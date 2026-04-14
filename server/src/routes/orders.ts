@@ -7,6 +7,7 @@ import { uploadsDir } from "../config";
 import { prisma } from "../prisma";
 import type { AuthRequest } from "../types";
 import { storageProvider } from "../services/storage";
+import { asyncHandler } from "../utils/asyncHandler";
 
 const createOrderSchema = z.object({
   content: z.string().min(1),
@@ -36,132 +37,148 @@ const upload = multer({ storage });
 
 export const ordersRouter = Router();
 
-ordersRouter.get("/", async (req: AuthRequest, res) => {
-  const user = req.user;
-  if (!user?.tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
-
-  const status = typeof req.query.status === "string" ? req.query.status : undefined;
-  const ownerCode = typeof req.query.ownerCode === "string" ? req.query.ownerCode : undefined;
-
-  const where: {
-    tenantId: string;
-    status?: OrderStatus;
-    ownerCode?: string;
-    createdByUserId?: string;
-  } = {
-    tenantId: user.tenantId,
-    status: status as OrderStatus | undefined
-  };
-  if (user.role === UserRole.SUB_ACCOUNT) {
-    if (!user.managerUserId) {
-      res.status(403).json({ message: "Sub account is not linked to an enterprise manager account" });
+ordersRouter.get(
+  "/",
+  asyncHandler(async (req: AuthRequest, res) => {
+    const user = req.user;
+    if (!user?.tenantId) {
+      res.status(400).json({ message: "Tenant is required" });
       return;
     }
-    where.createdByUserId = user.managerUserId;
-  } else if (ownerCode) {
-    where.ownerCode = ownerCode;
-  }
 
-  const orders = await prisma.order.findMany({
-    where,
-    orderBy: { createdAt: "desc" }
-  });
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const ownerCode = typeof req.query.ownerCode === "string" ? req.query.ownerCode : undefined;
 
-  res.json(orders);
-});
-
-ordersRouter.post("/", upload.single("image"), async (req: AuthRequest, res) => {
-  const user = req.user;
-  if (!user?.tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
-
-  if (user.role !== UserRole.ADMIN) {
-    res.status(403).json({ message: "Only admin can create orders" });
-    return;
-  }
-
-  const parsed = createOrderSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload" });
-    return;
-  }
-
-  const imageUrl = req.file ? (await storageProvider.upload(req.file)).url : null;
-
-  const created = await prisma.order.create({
-    data: {
+    const where: {
+      tenantId: string;
+      status?: OrderStatus;
+      ownerCode?: string;
+      createdByUserId?: string;
+    } = {
       tenantId: user.tenantId,
-      content: parsed.data.content,
-      ownerCode: parsed.data.ownerCode,
-      status: parsed.data.status,
-      imageUrl,
-      createdByUserId: user.id
+      status: status as OrderStatus | undefined
+    };
+
+    if (user.role === UserRole.SUB_ACCOUNT) {
+      if (!user.managerUserId) {
+        res.status(403).json({ message: "Sub account is not linked to an enterprise manager account" });
+        return;
+      }
+      where.createdByUserId = user.managerUserId;
+    } else if (ownerCode) {
+      where.ownerCode = ownerCode;
     }
-  });
 
-  res.status(201).json(created);
-});
+    const orders = await prisma.order.findMany({
+      where,
+      orderBy: { createdAt: "desc" }
+    });
 
-ordersRouter.patch("/:orderId/status", async (req: AuthRequest, res) => {
-  const user = req.user;
-  if (!user?.tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
+    res.json(orders);
+  })
+);
 
-  const parsed = updateStatusSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload" });
-    return;
-  }
-
-  const order = await prisma.order.findFirst({
-    where: { id: req.params.orderId, tenantId: user.tenantId }
-  });
-  if (!order) {
-    res.status(404).json({ message: "Order not found" });
-    return;
-  }
-
-  if (user.role === UserRole.SUB_ACCOUNT) {
-    if (!user.managerUserId || order.createdByUserId !== user.managerUserId) {
-      res.status(403).json({ message: "You can only update orders created by your enterprise manager account" });
+ordersRouter.post(
+  "/",
+  upload.single("image"),
+  asyncHandler(async (req: AuthRequest, res) => {
+    const user = req.user;
+    if (!user?.tenantId) {
+      res.status(400).json({ message: "Tenant is required" });
       return;
     }
-  }
 
-  const updated = await prisma.order.update({
-    where: { id: order.id },
-    data: { status: parsed.data.status }
-  });
+    if (user.role !== UserRole.ADMIN) {
+      res.status(403).json({ message: "Only admin can create orders" });
+      return;
+    }
 
-  res.json(updated);
-});
+    const parsed = createOrderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid payload" });
+      return;
+    }
 
-ordersRouter.delete("/:orderId", async (req: AuthRequest, res) => {
-  const user = req.user;
-  if (!user?.tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
-  if (user.role !== UserRole.ADMIN) {
-    res.status(403).json({ message: "Only admin can delete orders" });
-    return;
-  }
+    const imageUrl = req.file ? (await storageProvider.upload(req.file)).url : null;
 
-  const deleted = await prisma.order.deleteMany({
-    where: { id: req.params.orderId, tenantId: user.tenantId }
-  });
+    const created = await prisma.order.create({
+      data: {
+        tenantId: user.tenantId,
+        content: parsed.data.content,
+        ownerCode: parsed.data.ownerCode,
+        status: parsed.data.status,
+        imageUrl,
+        createdByUserId: user.id
+      }
+    });
 
-  if (!deleted.count) {
-    res.status(404).json({ message: "Order not found" });
-    return;
-  }
+    res.status(201).json(created);
+  })
+);
 
-  res.json({ message: "Order deleted" });
-});
+ordersRouter.patch(
+  "/:orderId/status",
+  asyncHandler(async (req: AuthRequest, res) => {
+    const user = req.user;
+    if (!user?.tenantId) {
+      res.status(400).json({ message: "Tenant is required" });
+      return;
+    }
+
+    const parsed = updateStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid payload" });
+      return;
+    }
+
+    const order = await prisma.order.findFirst({
+      where: { id: req.params.orderId, tenantId: user.tenantId }
+    });
+
+    if (!order) {
+      res.status(404).json({ message: "Order not found" });
+      return;
+    }
+
+    if (user.role === UserRole.SUB_ACCOUNT) {
+      if (!user.managerUserId || order.createdByUserId !== user.managerUserId) {
+        res.status(403).json({ message: "You can only update orders created by your enterprise manager account" });
+        return;
+      }
+    }
+
+    const updated = await prisma.order.update({
+      where: { id: order.id },
+      data: { status: parsed.data.status }
+    });
+
+    res.json(updated);
+  })
+);
+
+ordersRouter.delete(
+  "/:orderId",
+  asyncHandler(async (req: AuthRequest, res) => {
+    const user = req.user;
+    if (!user?.tenantId) {
+      res.status(400).json({ message: "Tenant is required" });
+      return;
+    }
+
+    if (user.role !== UserRole.ADMIN) {
+      res.status(403).json({ message: "Only admin can delete orders" });
+      return;
+    }
+
+    const deleted = await prisma.order.deleteMany({
+      where: { id: req.params.orderId, tenantId: user.tenantId }
+    });
+
+    if (!deleted.count) {
+      res.status(404).json({ message: "Order not found" });
+      return;
+    }
+
+    res.json({ message: "Order deleted" });
+  })
+);

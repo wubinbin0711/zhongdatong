@@ -49,20 +49,36 @@ class OssStorageProvider implements StorageProvider {
   async upload(file: UploadedFile): Promise<UploadResult> {
     const ext = path.extname(file.originalname || file.filename);
     const objectKey = `zdt/orders/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-    const result = await this.client.put(objectKey, file.path);
-    if (fs.existsSync(file.path)) {
-      fs.unlinkSync(file.path);
-    }
+    try {
+      const result = await this.client.put(objectKey, file.path);
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
 
-    const defaultUrl = `https://${this.bucket}.${env.OSS_REGION}.aliyuncs.com/${objectKey}`;
-    return {
-      url: env.OSS_CDN_BASE_URL
-        ? `${env.OSS_CDN_BASE_URL.replace(/\/$/, "")}/${objectKey}`
-        : result.url || defaultUrl
-    };
+      const defaultUrl = `https://${this.bucket}.${env.OSS_REGION}.aliyuncs.com/${objectKey}`;
+      return {
+        url: env.OSS_CDN_BASE_URL
+          ? `${env.OSS_CDN_BASE_URL.replace(/\/$/, "")}/${objectKey}`
+          : result.url || defaultUrl
+      };
+    } catch (error) {
+      console.error("[OSS upload failed] fallback to local:", error);
+      return { url: `/uploads/${file.filename}` };
+    }
   }
 }
 
-export const storageProvider: StorageProvider =
-  env.STORAGE_PROVIDER === "oss" ? new OssStorageProvider() : new LocalStorageProvider();
+const createStorageProvider = (): StorageProvider => {
+  if (env.STORAGE_PROVIDER !== "oss") {
+    return new LocalStorageProvider();
+  }
 
+  try {
+    return new OssStorageProvider();
+  } catch (error) {
+    console.error("[OSS init failed] fallback to local:", error);
+    return new LocalStorageProvider();
+  }
+};
+
+export const storageProvider: StorageProvider = createStorageProvider();
