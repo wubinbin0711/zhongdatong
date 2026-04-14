@@ -15,12 +15,6 @@ type User = {
   allowLogin?: boolean;
 };
 
-type Tenant = {
-  id: string;
-  name: string;
-  code: string;
-};
-
 type Order = {
   id: string;
   content: string;
@@ -68,7 +62,6 @@ function App() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [platformUsers, setPlatformUsers] = useState<User[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
 
   const [loginForm, setLoginForm] = useState({ account: "", password: "" });
   const [createOrderForm, setCreateOrderForm] = useState({
@@ -77,12 +70,11 @@ function App() {
     status: "TODO" as OrderStatus,
     image: null as File | null
   });
-  const [tenantForm, setTenantForm] = useState({ name: "", code: "" });
   const [accountForm, setAccountForm] = useState({
-    tenantId: "",
     account: "",
     password: "",
     role: "ADMIN" as Extract<Role, "ADMIN" | "SUB_ACCOUNT">,
+    tenantName: "",
     ownerCode: "1",
     managerUserId: ""
   });
@@ -93,46 +85,32 @@ function App() {
   const isSubAccount = user?.role === "SUB_ACCOUNT";
 
   const managerCandidates = useMemo(
-    () =>
-      platformUsers.filter(
-        (item) => item.role === "ADMIN" && item.tenantId === accountForm.tenantId
-      ),
-    [platformUsers, accountForm.tenantId]
+    () => platformUsers.filter((item) => item.role === "ADMIN"),
+    [platformUsers]
   );
 
   const resolveImageUrl = (url: string | null): string =>
     !url ? "#" : url.startsWith("http") ? url : `${API_ORIGIN}${url}`;
 
   const refreshOrders = async (): Promise<void> => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     const rows = await apiFetch<Order[]>("/orders", token);
     setOrders(rows);
   };
 
-  const refreshPlatformData = async (): Promise<void> => {
-    if (!token || !isPlatformAdmin) {
-      return;
-    }
-    const [users, tenantRows] = await Promise.all([
-      apiFetch<User[]>("/platform/users", token),
-      apiFetch<Tenant[]>("/platform/tenants", token)
-    ]);
+  const refreshPlatformUsers = async (): Promise<void> => {
+    if (!token || !isPlatformAdmin) return;
+    const users = await apiFetch<User[]>("/platform/users", token);
     setPlatformUsers(users);
-    setTenants(tenantRows);
-    setAccountForm((prev) => ({ ...prev, tenantId: prev.tenantId || tenantRows[0]?.id || "" }));
   };
 
   useEffect(() => {
-    if (!isLoggedIn) {
-      return;
-    }
+    if (!isLoggedIn) return;
     setError("");
     void (async () => {
       try {
         await refreshOrders();
-        await refreshPlatformData();
+        await refreshPlatformUsers();
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : "请求失败");
       }
@@ -170,22 +148,17 @@ function App() {
     setUser(null);
     setOrders([]);
     setPlatformUsers([]);
-    setTenants([]);
     setError("");
   };
 
   const onCreateOrder = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     const formData = new FormData();
     formData.append("content", createOrderForm.content);
     formData.append("ownerCode", createOrderForm.ownerCode);
     formData.append("status", createOrderForm.status);
-    if (createOrderForm.image) {
-      formData.append("image", createOrderForm.image);
-    }
+    if (createOrderForm.image) formData.append("image", createOrderForm.image);
 
     try {
       await apiFetch("/orders", token, { method: "POST", body: formData });
@@ -198,9 +171,7 @@ function App() {
   };
 
   const updateStatus = async (orderId: string, status: OrderStatus): Promise<void> => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
       await apiFetch(`/orders/${orderId}/status`, token, {
         method: "PATCH",
@@ -214,9 +185,7 @@ function App() {
   };
 
   const deleteOrder = async (orderId: string): Promise<void> => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
       await apiFetch(`/orders/${orderId}`, token, { method: "DELETE" });
       await refreshOrders();
@@ -225,97 +194,49 @@ function App() {
     }
   };
 
-  const onCreateTenant = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    if (!token) {
-      return;
-    }
-    try {
-      await apiFetch("/platform/tenants", token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tenantForm)
-      });
-      setTenantForm({ name: "", code: "" });
-      await refreshPlatformData();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "创建企业失败");
-    }
-  };
-
   const onCreateAccount = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
       await apiFetch("/platform/users", token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...accountForm,
+          account: accountForm.account,
+          password: accountForm.password,
+          role: accountForm.role,
+          tenantName: accountForm.role === "ADMIN" ? accountForm.tenantName : undefined,
+          ownerCode: accountForm.role === "SUB_ACCOUNT" ? accountForm.ownerCode : undefined,
           managerUserId: accountForm.role === "SUB_ACCOUNT" ? accountForm.managerUserId : undefined
         })
       });
-      setAccountForm((prev) => ({
-        ...prev,
+      setAccountForm({
         account: "",
         password: "",
+        role: "ADMIN",
+        tenantName: "",
         ownerCode: "1",
         managerUserId: ""
-      }));
-      await refreshPlatformData();
+      });
+      await refreshPlatformUsers();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "创建账号失败");
     }
   };
 
   const toggleUserLogin = async (targetUser: User, allowLogin: boolean): Promise<void> => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
       await apiFetch(`/platform/users/${targetUser.id}/login-access`, token, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ allowLogin })
       });
-      await refreshPlatformData();
+      await refreshPlatformUsers();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "登录权限更新失败");
     }
   };
-
-  const renderLogin = () => (
-    <div className="app-bg login-layout">
-      <div className="bg-orb orb-left" />
-      <div className="bg-orb orb-right" />
-      <div className="brand-float">
-        <img src={logo} alt="ZDT logo" className="brand-logo-large" />
-        <div>
-          <h1>中大通 ZDT</h1>
-          <p>Future B2B Order Command Center</p>
-        </div>
-      </div>
-      <form className="glass login-card" onSubmit={onLogin}>
-        <h2>Sign In / 登录</h2>
-        <span>账号密码登录，权限由超级管理员控制</span>
-        <input
-          placeholder="账号 Account"
-          value={loginForm.account}
-          onChange={(event) => setLoginForm((prev) => ({ ...prev, account: event.target.value }))}
-        />
-        <input
-          type="password"
-          placeholder="密码 Password"
-          value={loginForm.password}
-          onChange={(event) => setLoginForm((prev) => ({ ...prev, password: event.target.value }))}
-        />
-        <button type="submit">进入系统</button>
-        {error ? <p className="error-text">{error}</p> : null}
-      </form>
-    </div>
-  );
 
   const renderOrderRows = (allowDelete: boolean) => (
     <section className="stack">
@@ -352,6 +273,37 @@ function App() {
         </article>
       ))}
     </section>
+  );
+
+  const renderLogin = () => (
+    <div className="app-bg login-layout">
+      <div className="bg-orb orb-left" />
+      <div className="bg-orb orb-right" />
+      <div className="brand-float">
+        <img src={logo} alt="ZDT logo" className="brand-logo-large" />
+        <div>
+          <h1>中大通 ZDT</h1>
+          <p>Future B2B Order Command Center</p>
+        </div>
+      </div>
+      <form className="glass login-card" onSubmit={onLogin}>
+        <h2>Sign In / 登录</h2>
+        <span>账号密码登录，权限由超级管理员控制</span>
+        <input
+          placeholder="账号 Account"
+          value={loginForm.account}
+          onChange={(event) => setLoginForm((prev) => ({ ...prev, account: event.target.value }))}
+        />
+        <input
+          type="password"
+          placeholder="密码 Password"
+          value={loginForm.password}
+          onChange={(event) => setLoginForm((prev) => ({ ...prev, password: event.target.value }))}
+        />
+        <button type="submit">进入系统</button>
+        {error ? <p className="error-text">{error}</p> : null}
+      </form>
+    </div>
   );
 
   const renderMother = () => (
@@ -505,10 +457,6 @@ function App() {
 
           <section className="stats-grid">
             <article className="glass stat-item">
-              <span>企业数量</span>
-              <strong>{tenants.length}</strong>
-            </article>
-            <article className="glass stat-item">
               <span>母账号数量</span>
               <strong>{platformUsers.filter((x) => x.role === "ADMIN").length}</strong>
             </article>
@@ -516,41 +464,16 @@ function App() {
               <span>子账号数量</span>
               <strong>{platformUsers.filter((x) => x.role === "SUB_ACCOUNT").length}</strong>
             </article>
+            <article className="glass stat-item">
+              <span>总账号</span>
+              <strong>{platformUsers.length}</strong>
+            </article>
           </section>
 
           <section className="two-pane">
-            <form className="glass form-card" onSubmit={onCreateTenant}>
-              <h4>创建企业</h4>
-              <input
-                placeholder="企业名称"
-                value={tenantForm.name}
-                onChange={(event) => setTenantForm((prev) => ({ ...prev, name: event.target.value }))}
-                required
-              />
-              <input
-                placeholder="企业编码（唯一）"
-                value={tenantForm.code}
-                onChange={(event) => setTenantForm((prev) => ({ ...prev, code: event.target.value }))}
-                required
-              />
-              <button type="submit">创建企业</button>
-            </form>
-
             <form className="glass form-card" onSubmit={onCreateAccount}>
-              <h4>创建母账号 / 子账号</h4>
+              <h4>创建企业母账号 / 子账号</h4>
               <div className="two-col">
-                <select
-                  value={accountForm.tenantId}
-                  onChange={(event) => setAccountForm((prev) => ({ ...prev, tenantId: event.target.value }))}
-                  required
-                >
-                  <option value="">选择企业</option>
-                  {tenants.map((tenant) => (
-                    <option key={tenant.id} value={tenant.id}>
-                      {tenant.name} ({tenant.code})
-                    </option>
-                  ))}
-                </select>
                 <select
                   value={accountForm.role}
                   onChange={(event) =>
@@ -563,6 +486,14 @@ function App() {
                   <option value="ADMIN">企业母账号</option>
                   <option value="SUB_ACCOUNT">企业子账号</option>
                 </select>
+                <input
+                  placeholder="企业名称（创建母账号时）"
+                  value={accountForm.tenantName}
+                  onChange={(event) =>
+                    setAccountForm((prev) => ({ ...prev, tenantName: event.target.value }))
+                  }
+                  required={accountForm.role === "ADMIN"}
+                />
               </div>
               <input
                 placeholder="账号（母账号需 01/02/03 结尾）"
@@ -604,6 +535,13 @@ function App() {
               ) : null}
               <button type="submit">创建账号</button>
             </form>
+
+            <div className="glass form-card">
+              <h4>创建规则</h4>
+              <p>创建企业步骤就是创建母账号，不需要企业编码。</p>
+              <p>创建子账号时选择上级母账号，系统自动归属企业。</p>
+              <p>母账号只拥有订单新增/删除权限。</p>
+            </div>
           </section>
 
           <section className="stack">
@@ -628,18 +566,10 @@ function App() {
     </div>
   );
 
-  if (!isLoggedIn) {
-    return renderLogin();
-  }
-  if (isPlatformAdmin) {
-    return renderPlatform();
-  }
-  if (isMotherAccount) {
-    return renderMother();
-  }
-  if (isSubAccount) {
-    return renderSub();
-  }
+  if (!isLoggedIn) return renderLogin();
+  if (isPlatformAdmin) return renderPlatform();
+  if (isMotherAccount) return renderMother();
+  if (isSubAccount) return renderSub();
   return null;
 }
 

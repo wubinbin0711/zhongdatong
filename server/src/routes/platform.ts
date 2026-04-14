@@ -9,17 +9,12 @@ const updateLoginSchema = z.object({
   allowLogin: z.boolean()
 });
 
-const createTenantSchema = z.object({
-  name: z.string().min(2),
-  code: z.string().min(2)
-});
-
 const createEnterpriseUserSchema = z
   .object({
-    tenantId: z.string().min(1),
     account: z.string().min(3),
     password: z.string().min(6),
     role: z.enum([UserRole.ADMIN, UserRole.SUB_ACCOUNT]),
+    tenantName: z.string().min(2).optional(),
     ownerCode: z.string().min(1).max(8).optional(),
     managerUserId: z.string().min(1).optional(),
     allowLogin: z.boolean().default(true)
@@ -55,26 +50,6 @@ platformRouter.get("/tenants", async (_req, res) => {
   res.json(tenants);
 });
 
-platformRouter.post("/tenants", async (req, res) => {
-  const parsed = createTenantSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload" });
-    return;
-  }
-  const existing = await prisma.tenant.findUnique({ where: { code: parsed.data.code } });
-  if (existing) {
-    res.status(409).json({ message: "Tenant code already exists" });
-    return;
-  }
-  const created = await prisma.tenant.create({
-    data: {
-      name: parsed.data.name,
-      code: parsed.data.code
-    }
-  });
-  res.status(201).json(created);
-});
-
 platformRouter.get("/users", async (req, res) => {
   const tenantId = typeof req.query.tenantId === "string" ? req.query.tenantId : undefined;
   const users = await prisma.user.findMany({
@@ -100,23 +75,29 @@ platformRouter.post("/users", async (req, res) => {
     return;
   }
 
-  const tenant = await prisma.tenant.findUnique({ where: { id: parsed.data.tenantId } });
-  if (!tenant) {
-    res.status(404).json({ message: "Tenant not found" });
-    return;
-  }
-
   const existing = await prisma.user.findUnique({ where: { account: parsed.data.account } });
   if (existing) {
     res.status(409).json({ message: "Account already exists" });
     return;
   }
 
+  let tenantId: string | null = null;
+
+  if (parsed.data.role === UserRole.ADMIN) {
+    const safeCode = `tenant-${Date.now()}-${Math.round(Math.random() * 10000)}`;
+    const tenant = await prisma.tenant.create({
+      data: {
+        name: parsed.data.tenantName ?? `企业-${parsed.data.account}`,
+        code: safeCode
+      }
+    });
+    tenantId = tenant.id;
+  }
+
   if (parsed.data.role === UserRole.SUB_ACCOUNT) {
     const manager = await prisma.user.findFirst({
       where: {
         id: parsed.data.managerUserId,
-        tenantId: parsed.data.tenantId,
         role: UserRole.ADMIN
       }
     });
@@ -124,11 +105,12 @@ platformRouter.post("/users", async (req, res) => {
       res.status(400).json({ message: "Valid enterprise manager account is required" });
       return;
     }
+    tenantId = manager.tenantId;
   }
 
   const created = await prisma.user.create({
     data: {
-      tenantId: parsed.data.tenantId,
+      tenantId,
       account: parsed.data.account,
       passwordHash: await hashPassword(parsed.data.password),
       role: parsed.data.role,
