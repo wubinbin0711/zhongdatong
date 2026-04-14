@@ -5,7 +5,6 @@ import { env } from "../config";
 import { prisma } from "../prisma";
 import { hashPassword, verifyPassword } from "../utils/password";
 import { signToken } from "../utils/jwt";
-import { isValidManagerAccount } from "../utils/accountRules";
 
 const loginSchema = z.object({
   account: z.string().min(3),
@@ -90,11 +89,6 @@ authRouter.post("/bootstrap-admin", async (req, res) => {
     res.status(409).json({ message: "Account already exists" });
     return;
   }
-  if (!isValidManagerAccount(parsed.data.account)) {
-    res.status(400).json({ message: "Enterprise manager account must end with 01, 02, or 03" });
-    return;
-  }
-
   const tenant =
     (await prisma.tenant.findUnique({ where: { code: parsed.data.tenantCode } })) ??
     (await prisma.tenant.create({

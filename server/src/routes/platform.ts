@@ -3,7 +3,6 @@ import { UserRole } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { hashPassword } from "../utils/password";
-import { isValidManagerAccount } from "../utils/accountRules";
 
 const updateLoginSchema = z.object({
   allowLogin: z.boolean()
@@ -20,13 +19,6 @@ const createEnterpriseUserSchema = z
     allowLogin: z.boolean().default(true)
   })
   .superRefine((value, ctx) => {
-    if (value.role === UserRole.ADMIN && !isValidManagerAccount(value.account)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["account"],
-        message: "Enterprise manager account must end with 01, 02, or 03"
-      });
-    }
     if (value.role === UserRole.SUB_ACCOUNT && !value.managerUserId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
