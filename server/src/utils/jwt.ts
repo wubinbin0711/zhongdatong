@@ -7,6 +7,7 @@ type TokenPayload = {
   role: AuthUser["role"];
   tenantId: string | null;
   ownerCode: string | null;
+  managerUserId: string | null;
 };
 
 export const signToken = (payload: TokenPayload): string =>
@@ -14,4 +15,3 @@ export const signToken = (payload: TokenPayload): string =>
 
 export const verifyToken = (token: string): TokenPayload =>
   jwt.verify(token, env.JWT_SECRET) as TokenPayload;
-

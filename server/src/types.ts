@@ -6,9 +6,9 @@ export type AuthUser = {
   role: UserRole;
   tenantId: string | null;
   ownerCode: string | null;
+  managerUserId: string | null;
 };
 
 export type AuthRequest = Request & {
   user?: AuthUser;
 };
-

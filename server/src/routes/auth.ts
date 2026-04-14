@@ -5,6 +5,7 @@ import { env } from "../config";
 import { prisma } from "../prisma";
 import { hashPassword, verifyPassword } from "../utils/password";
 import { signToken } from "../utils/jwt";
+import { isValidManagerAccount } from "../utils/accountRules";
 
 const loginSchema = z.object({
   account: z.string().min(3),
@@ -55,7 +56,8 @@ authRouter.post("/login", async (req, res) => {
     id: user.id,
     role: user.role,
     tenantId: user.tenantId ?? null,
-    ownerCode: user.ownerCode ?? null
+    ownerCode: user.ownerCode ?? null,
+    managerUserId: user.managerUserId ?? null
   });
 
   res.json({
@@ -65,7 +67,8 @@ authRouter.post("/login", async (req, res) => {
       account: user.account,
       role: user.role,
       tenantId: user.tenantId,
-      ownerCode: user.ownerCode
+      ownerCode: user.ownerCode,
+      managerUserId: user.managerUserId
     }
   });
 });
@@ -87,6 +90,10 @@ authRouter.post("/bootstrap-admin", async (req, res) => {
     res.status(409).json({ message: "Account already exists" });
     return;
   }
+  if (!isValidManagerAccount(parsed.data.account)) {
+    res.status(400).json({ message: "Enterprise manager account must end with 01, 02, or 03" });
+    return;
+  }
 
   const tenant =
     (await prisma.tenant.findUnique({ where: { code: parsed.data.tenantCode } })) ??
@@ -100,7 +107,8 @@ authRouter.post("/bootstrap-admin", async (req, res) => {
       passwordHash: await hashPassword(parsed.data.password),
       role: UserRole.ADMIN,
       tenantId: tenant.id,
-      allowLogin: true
+      allowLogin: true,
+      managerUserId: null
     }
   });
 
@@ -131,7 +139,8 @@ authRouter.post("/bootstrap-platform", async (req, res) => {
       account: parsed.data.account,
       passwordHash: await hashPassword(parsed.data.password),
       role: UserRole.PLATFORM_ADMIN,
-      allowLogin: true
+      allowLogin: true,
+      managerUserId: null
     }
   });
 

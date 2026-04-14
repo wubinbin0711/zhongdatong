@@ -33,6 +33,7 @@ model Tenant {
 model User {
   id           String    @id @default(cuid())
   tenantId     String?
+  managerUserId String?
   account      String    @unique
   passwordHash String
   role         UserRole
@@ -43,6 +44,8 @@ model User {
 
   tenant         Tenant?  @relation(fields: [tenantId], references: [id])
   createdOrders  Order[]  @relation("OrderCreator")
+  manager        User?    @relation("UserManager", fields: [managerUserId], references: [id])
+  subAccounts    User[]   @relation("UserManager")
 }
 
 model Order {
@@ -62,4 +65,3 @@ model Order {
   @@index([tenantId, ownerCode])
   @@index([tenantId, status])
 }
-

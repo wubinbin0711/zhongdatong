@@ -9,6 +9,7 @@ type User = {
   role: Role;
   tenantId: string | null;
   ownerCode: string | null;
+  managerUserId?: string | null;
   allowLogin?: boolean;
 };
 
@@ -80,7 +81,7 @@ function App() {
   const [createSubForm, setCreateSubForm] = useState({
     account: "",
     password: "",
-    role: "SUB_ACCOUNT" as Extract<Role, "ADMIN" | "SUB_ACCOUNT">,
+    role: "SUB_ACCOUNT" as Extract<Role, "SUB_ACCOUNT">,
     ownerCode: "1"
   });
 
@@ -412,12 +413,11 @@ function App() {
                   onChange={(event) =>
                     setCreateSubForm((prev) => ({
                       ...prev,
-                      role: event.target.value as Extract<Role, "ADMIN" | "SUB_ACCOUNT">
+                      role: event.target.value as Extract<Role, "SUB_ACCOUNT">
                     }))
                   }
                 >
                   <option value="SUB_ACCOUNT">子账号</option>
-                  <option value="ADMIN">管理员</option>
                 </select>
                 <input
                   placeholder="负责人编号(子账号用)"
@@ -476,4 +476,3 @@ export default App;
     }
     return url.startsWith("http://") || url.startsWith("https://") ? url : `${API_ORIGIN}${url}`;
   };
-

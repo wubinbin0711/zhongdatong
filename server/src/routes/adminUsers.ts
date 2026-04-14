@@ -8,7 +8,7 @@ import { hashPassword } from "../utils/password";
 const createUserSchema = z.object({
   account: z.string().min(3),
   password: z.string().min(6),
-  role: z.enum([UserRole.ADMIN, UserRole.SUB_ACCOUNT]),
+  role: z.literal(UserRole.SUB_ACCOUNT),
   ownerCode: z.string().min(1).max(8).optional(),
   allowLogin: z.boolean().default(true)
 });
@@ -25,13 +25,14 @@ export const adminUsersRouter = Router();
 
 adminUsersRouter.get("/", async (req: AuthRequest, res) => {
   const tenantId = req.user?.tenantId;
+  const managerUserId = req.user?.id;
   if (!tenantId) {
     res.status(400).json({ message: "Tenant is required" });
     return;
   }
 
   const users = await prisma.user.findMany({
-    where: { tenantId },
+    where: { tenantId, role: UserRole.SUB_ACCOUNT, managerUserId },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -39,7 +40,8 @@ adminUsersRouter.get("/", async (req: AuthRequest, res) => {
       role: true,
       ownerCode: true,
       allowLogin: true,
-      createdAt: true
+      createdAt: true,
+      managerUserId: true
     }
   });
 
@@ -54,6 +56,7 @@ adminUsersRouter.post("/", async (req: AuthRequest, res) => {
   }
 
   const tenantId = req.user?.tenantId;
+  const managerUserId = req.user?.id;
   if (!tenantId) {
     res.status(400).json({ message: "Tenant is required" });
     return;
@@ -72,14 +75,16 @@ adminUsersRouter.post("/", async (req: AuthRequest, res) => {
       role: parsed.data.role,
       ownerCode: parsed.data.ownerCode,
       allowLogin: parsed.data.allowLogin,
-      tenantId
+      tenantId,
+      managerUserId
     },
     select: {
       id: true,
       account: true,
       role: true,
       ownerCode: true,
-      allowLogin: true
+      allowLogin: true,
+      managerUserId: true
     }
   });
 
@@ -94,13 +99,14 @@ adminUsersRouter.patch("/:userId/login-access", async (req: AuthRequest, res) =>
   }
 
   const tenantId = req.user?.tenantId;
+  const managerUserId = req.user?.id;
   if (!tenantId) {
     res.status(400).json({ message: "Tenant is required" });
     return;
   }
 
   const updated = await prisma.user.updateMany({
-    where: { id: req.params.userId, tenantId },
+    where: { id: req.params.userId, tenantId, role: UserRole.SUB_ACCOUNT, managerUserId },
     data: { allowLogin: parsed.data.allowLogin }
   });
 
@@ -120,13 +126,14 @@ adminUsersRouter.post("/:userId/reset-password", async (req: AuthRequest, res) =
   }
 
   const tenantId = req.user?.tenantId;
+  const managerUserId = req.user?.id;
   if (!tenantId) {
     res.status(400).json({ message: "Tenant is required" });
     return;
   }
 
   const updated = await prisma.user.updateMany({
-    where: { id: req.params.userId, tenantId },
+    where: { id: req.params.userId, tenantId, role: UserRole.SUB_ACCOUNT, managerUserId },
     data: { passwordHash: await hashPassword(parsed.data.newPassword) }
   });
 
@@ -137,4 +144,3 @@ adminUsersRouter.post("/:userId/reset-password", async (req: AuthRequest, res) =
 
   res.json({ message: "Password reset complete" });
 });
-

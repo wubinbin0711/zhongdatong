@@ -46,11 +46,24 @@ ordersRouter.get("/", async (req: AuthRequest, res) => {
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   const ownerCode = typeof req.query.ownerCode === "string" ? req.query.ownerCode : undefined;
 
-  const where = {
+  const where: {
+    tenantId: string;
+    status?: OrderStatus;
+    ownerCode?: string;
+    createdByUserId?: string;
+  } = {
     tenantId: user.tenantId,
-    status: status as OrderStatus | undefined,
-    ownerCode: user.role === UserRole.SUB_ACCOUNT ? user.ownerCode ?? "__never__" : ownerCode
+    status: status as OrderStatus | undefined
   };
+  if (user.role === UserRole.SUB_ACCOUNT) {
+    if (!user.managerUserId) {
+      res.status(403).json({ message: "Sub account is not linked to an enterprise manager account" });
+      return;
+    }
+    where.createdByUserId = user.managerUserId;
+  } else if (ownerCode) {
+    where.ownerCode = ownerCode;
+  }
 
   const orders = await prisma.order.findMany({
     where,
@@ -115,9 +128,11 @@ ordersRouter.patch("/:orderId/status", async (req: AuthRequest, res) => {
     return;
   }
 
-  if (user.role === UserRole.SUB_ACCOUNT && order.ownerCode !== user.ownerCode) {
-    res.status(403).json({ message: "You can only update your own responsible orders" });
-    return;
+  if (user.role === UserRole.SUB_ACCOUNT) {
+    if (!user.managerUserId || order.createdByUserId !== user.managerUserId) {
+      res.status(403).json({ message: "You can only update orders created by your enterprise manager account" });
+      return;
+    }
   }
 
   const updated = await prisma.order.update({
