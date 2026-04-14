@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  PLATFORM_ADMIN
+  ADMIN
+  SUB_ACCOUNT
+}
+
+enum OrderStatus {
+  COMPLETED
+  TODO
+  OUT_OF_STOCK
+  IN_PROGRESS
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  users     User[]
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String?
+  account      String    @unique
+  passwordHash String
+  role         UserRole
+  ownerCode    String?
+  allowLogin   Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant         Tenant?  @relation(fields: [tenantId], references: [id])
+  createdOrders  Order[]  @relation("OrderCreator")
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  tenantId        String
+  content         String      @db.Text
+  ownerCode       String
+  status          OrderStatus @default(TODO)
+  imageUrl        String?
+  createdByUserId String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  creator   User   @relation("OrderCreator", fields: [createdByUserId], references: [id])
+
+  @@index([tenantId, ownerCode])
+  @@index([tenantId, status])
+}
+
