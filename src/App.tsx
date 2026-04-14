@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import logo from "./assets/logow.png";
 
 type Role = "PLATFORM_ADMIN" | "ADMIN" | "SUB_ACCOUNT";
 type OrderStatus = "COMPLETED" | "TODO" | "OUT_OF_STOCK" | "IN_PROGRESS";
+type Page = "orders" | "create" | "platform";
 
 type User = {
   id: string;
@@ -11,6 +13,12 @@ type User = {
   ownerCode: string | null;
   managerUserId?: string | null;
   allowLogin?: boolean;
+};
+
+type Tenant = {
+  id: string;
+  name: string;
+  code: string;
 };
 
 type Order = {
@@ -23,20 +31,17 @@ type Order = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001/api";
-const tokenKey = "zdt.token";
-const userKey = "zdt.user";
 const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+const TOKEN_KEY = "zdt.token";
+const USER_KEY = "zdt.user";
 
-const pageLabels = {
+const PAGE_LABELS: Record<Page, string> = {
   orders: "订单列表 / Orders",
   create: "新增订单 / Create",
-  subAccounts: "子账号管理 / Sub Accounts",
-  platform: "平台控制 / Platform"
-} as const;
+  platform: "超级管理员 / Super Admin"
+};
 
-type Page = keyof typeof pageLabels;
-
-const statusLabel: Record<OrderStatus, string> = {
+const STATUS_LABELS: Record<OrderStatus, string> = {
   COMPLETED: "已完成 Completed",
   TODO: "待完成 Todo",
   OUT_OF_STOCK: "缺货 Out of stock",
@@ -58,18 +63,24 @@ async function apiFetch<T>(url: string, token: string, init?: RequestInit): Prom
   return (await response.json()) as T;
 }
 
+function defaultPageByRole(role: Role): Page {
+  return role === "PLATFORM_ADMIN" ? "platform" : "orders";
+}
+
 function App() {
-  const [token, setToken] = useState<string>(() => localStorage.getItem(tokenKey) ?? "");
+  const [token, setToken] = useState<string>(() => localStorage.getItem(TOKEN_KEY) ?? "");
   const [user, setUser] = useState<User | null>(() => {
-    const raw = localStorage.getItem(userKey);
+    const raw = localStorage.getItem(USER_KEY);
     return raw ? (JSON.parse(raw) as User) : null;
   });
-  const [activePage, setActivePage] = useState<Page>("orders");
+  const [activePage, setActivePage] = useState<Page>(() =>
+    user ? defaultPageByRole(user.role) : "orders"
+  );
   const [error, setError] = useState("");
 
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tenantUsers, setTenantUsers] = useState<User[]>([]);
   const [platformUsers, setPlatformUsers] = useState<User[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
 
   const [loginForm, setLoginForm] = useState({ account: "", password: "" });
   const [createOrderForm, setCreateOrderForm] = useState({
@@ -78,61 +89,64 @@ function App() {
     status: "TODO" as OrderStatus,
     image: null as File | null
   });
-  const [createSubForm, setCreateSubForm] = useState({
+  const [tenantForm, setTenantForm] = useState({ name: "", code: "" });
+  const [accountForm, setAccountForm] = useState({
+    tenantId: "",
     account: "",
     password: "",
-    role: "SUB_ACCOUNT" as Extract<Role, "SUB_ACCOUNT">,
-    ownerCode: "1"
+    role: "ADMIN" as Extract<Role, "ADMIN" | "SUB_ACCOUNT">,
+    ownerCode: "1",
+    managerUserId: ""
   });
 
   const isLoggedIn = Boolean(token && user);
-  const canCreateOrder = user?.role === "ADMIN";
-  const canManageSubAccounts = user?.role === "ADMIN";
-  const canUsePlatform = user?.role === "PLATFORM_ADMIN";
+  const isPlatformAdmin = user?.role === "PLATFORM_ADMIN";
+  const isMotherAccount = user?.role === "ADMIN";
 
-  const visibleNav = useMemo(() => {
-    const pages: Page[] = ["orders"];
-    if (canCreateOrder) {
-      pages.push("create");
-    }
-    if (canManageSubAccounts) {
-      pages.push("subAccounts");
-    }
-    if (canUsePlatform) {
-      pages.push("platform");
-    }
-    return pages;
-  }, [canCreateOrder, canManageSubAccounts, canUsePlatform]);
+  const navPages = useMemo(() => {
+    if (!user) return [] as Page[];
+    if (user.role === "PLATFORM_ADMIN") return ["platform"] as Page[];
+    if (user.role === "ADMIN") return ["orders", "create"] as Page[];
+    return ["orders"] as Page[];
+  }, [user]);
+
+  const managerCandidates = useMemo(
+    () =>
+      platformUsers.filter(
+        (item) => item.role === "ADMIN" && item.tenantId === accountForm.tenantId
+      ),
+    [platformUsers, accountForm.tenantId]
+  );
 
   useEffect(() => {
-    if (!isLoggedIn) {
-      return;
-    }
+    if (!isLoggedIn) return;
     void refreshData(activePage);
   }, [activePage, isLoggedIn]);
 
   const refreshData = async (page: Page): Promise<void> => {
+    if (!token || !user) return;
     setError("");
-    if (!token || !user) {
-      return;
-    }
     try {
       if (page === "orders") {
         const rows = await apiFetch<Order[]>("/orders", token);
         setOrders(rows);
       }
-      if (page === "subAccounts" && canManageSubAccounts) {
-        const rows = await apiFetch<User[]>("/admin/users", token);
-        setTenantUsers(rows);
+      if (page === "platform" && isPlatformAdmin) {
+        const [users, tenantRows] = await Promise.all([
+          apiFetch<User[]>("/platform/users", token),
+          apiFetch<Tenant[]>("/platform/tenants", token)
+        ]);
+        setPlatformUsers(users);
+        setTenants(tenantRows);
+        setAccountForm((prev) => ({ ...prev, tenantId: prev.tenantId || tenantRows[0]?.id || "" }));
       }
-      if (page === "platform" && canUsePlatform) {
-        const rows = await apiFetch<User[]>("/platform/users", token);
-        setPlatformUsers(rows);
-      }
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "请求失败");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "请求失败");
     }
   };
+
+  const resolveImageUrl = (url: string | null): string =>
+    !url ? "#" : url.startsWith("http") ? url : `${API_ORIGIN}${url}`;
 
   const onLogin = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -150,52 +164,46 @@ function App() {
       const data = (await response.json()) as { token: string; user: User };
       setToken(data.token);
       setUser(data.user);
-      localStorage.setItem(tokenKey, data.token);
-      localStorage.setItem(userKey, JSON.stringify(data.user));
-      setActivePage("orders");
+      localStorage.setItem(TOKEN_KEY, data.token);
+      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      setActivePage(defaultPageByRole(data.user.role));
     } catch {
       setError("网络异常，登录失败");
     }
   };
 
   const onLogout = (): void => {
-    localStorage.removeItem(tokenKey);
-    localStorage.removeItem(userKey);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
     setToken("");
     setUser(null);
     setOrders([]);
-    setTenantUsers([]);
     setPlatformUsers([]);
-    setCreateOrderForm({ content: "", ownerCode: "1", status: "TODO", image: null });
-    setCreateSubForm({ account: "", password: "", role: "SUB_ACCOUNT", ownerCode: "1" });
+    setTenants([]);
+    setActivePage("orders");
   };
 
   const onCreateOrder = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     const formData = new FormData();
     formData.append("content", createOrderForm.content);
     formData.append("ownerCode", createOrderForm.ownerCode);
     formData.append("status", createOrderForm.status);
-    if (createOrderForm.image) {
-      formData.append("image", createOrderForm.image);
-    }
+    if (createOrderForm.image) formData.append("image", createOrderForm.image);
+
     try {
       await apiFetch("/orders", token, { method: "POST", body: formData });
       setCreateOrderForm({ content: "", ownerCode: "1", status: "TODO", image: null });
       setActivePage("orders");
       await refreshData("orders");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "新增订单失败");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "新增订单失败");
     }
   };
 
   const updateStatus = async (orderId: string, status: OrderStatus): Promise<void> => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
       await apiFetch(`/orders/${orderId}/status`, token, {
         method: "PATCH",
@@ -203,55 +211,73 @@ function App() {
         body: JSON.stringify({ status })
       });
       await refreshData("orders");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "更新状态失败");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新状态失败");
     }
   };
 
   const deleteOrder = async (orderId: string): Promise<void> => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
       await apiFetch(`/orders/${orderId}`, token, { method: "DELETE" });
       await refreshData("orders");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "删除失败");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败");
     }
   };
 
-  const createSubAccount = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+  const onCreateTenant = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     try {
-      await apiFetch("/admin/users", token, {
+      await apiFetch("/platform/tenants", token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createSubForm)
+        body: JSON.stringify(tenantForm)
       });
-      setCreateSubForm({ account: "", password: "", role: "SUB_ACCOUNT", ownerCode: "1" });
-      await refreshData("subAccounts");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "新增账号失败");
+      setTenantForm({ name: "", code: "" });
+      await refreshData("platform");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "创建企业失败");
     }
   };
 
-  const toggleUserLogin = async (targetUser: User, allowLogin: boolean): Promise<void> => {
-    if (!token) {
-      return;
-    }
-    const basePath = user?.role === "PLATFORM_ADMIN" ? "/platform/users" : "/admin/users";
+  const onCreateAccount = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (!token) return;
     try {
-      await apiFetch(`${basePath}/${targetUser.id}/login-access`, token, {
+      await apiFetch("/platform/users", token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...accountForm,
+          managerUserId: accountForm.role === "SUB_ACCOUNT" ? accountForm.managerUserId : undefined
+        })
+      });
+      setAccountForm((prev) => ({
+        ...prev,
+        account: "",
+        password: "",
+        ownerCode: "1",
+        managerUserId: ""
+      }));
+      await refreshData("platform");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "创建账号失败");
+    }
+  };
+
+  const toggleLogin = async (targetUser: User, allowLogin: boolean): Promise<void> => {
+    if (!token) return;
+    try {
+      await apiFetch(`/platform/users/${targetUser.id}/login-access`, token, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ allowLogin })
       });
-      await refreshData(activePage);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "更新登录权限失败");
+      await refreshData("platform");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新登录权限失败");
     }
   };
 
@@ -261,7 +287,10 @@ function App() {
         <div className="orb orb-a" />
         <div className="orb orb-b" />
         <form className="glass-card login-card" onSubmit={onLogin}>
-          <h1>中大通 ZDT</h1>
+          <div className="brand-row">
+            <img src={logo} alt="ZDT logo" className="brand-logo" />
+            <h1>中大通 ZDT</h1>
+          </div>
           <p>Sign in / 登录</p>
           <input
             placeholder="账号 Account"
@@ -286,16 +315,19 @@ function App() {
       <div className="orb orb-a" />
       <div className="orb orb-b" />
       <aside className="glass-card sidebar">
-        <h2>中大通 ZDT</h2>
+        <div className="brand-row">
+          <img src={logo} alt="ZDT logo" className="brand-logo side" />
+          <h2>中大通 ZDT</h2>
+        </div>
         <p>{user?.tenantId ? `Tenant: ${user.tenantId}` : "Platform account"}</p>
-        {visibleNav.map((page) => (
+        {navPages.map((page) => (
           <button
             key={page}
             className={activePage === page ? "nav-btn active" : "nav-btn"}
             onClick={() => setActivePage(page)}
             type="button"
           >
-            {pageLabels[page]}
+            {PAGE_LABELS[page]}
           </button>
         ))}
         <button className="nav-btn" type="button" onClick={onLogout}>
@@ -305,14 +337,14 @@ function App() {
 
       <main className="glass-card content">
         <header className="content-head">
-          <h1>{pageLabels[activePage]}</h1>
+          <h1>{PAGE_LABELS[activePage]}</h1>
           <span>
             {user.account} / {user.role}
           </span>
         </header>
         {error ? <div className="error-box">{error}</div> : null}
 
-        {activePage === "orders" ? (
+        {activePage === "orders" && (
           <section className="panel">
             {orders.map((order) => (
               <article key={order.id} className="order-row">
@@ -321,35 +353,35 @@ function App() {
                   <small>
                     负责人 {order.ownerCode} | {new Date(order.createdAt).toLocaleString("zh-CN")}
                   </small>
-                  {order.imageUrl ? (
+                  {order.imageUrl && (
                     <a href={resolveImageUrl(order.imageUrl)} target="_blank" rel="noreferrer">
                       查看图片 View Image
                     </a>
-                  ) : null}
+                  )}
                 </div>
                 <div className="order-actions">
                   <select
                     value={order.status}
                     onChange={(event) => void updateStatus(order.id, event.target.value as OrderStatus)}
                   >
-                    {Object.entries(statusLabel).map(([value, label]) => (
+                    {Object.entries(STATUS_LABELS).map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
                     ))}
                   </select>
-                  {user.role === "ADMIN" ? (
+                  {isMotherAccount && (
                     <button type="button" onClick={() => void deleteOrder(order.id)}>
                       删除
                     </button>
-                  ) : null}
+                  )}
                 </div>
               </article>
             ))}
           </section>
-        ) : null}
+        )}
 
-        {activePage === "create" ? (
+        {activePage === "create" && (
           <form className="panel form" onSubmit={onCreateOrder}>
             <textarea
               placeholder="粘贴整段订单内容..."
@@ -373,7 +405,7 @@ function App() {
                   setCreateOrderForm((prev) => ({ ...prev, status: event.target.value as OrderStatus }))
                 }
               >
-                {Object.entries(statusLabel).map(([value, label]) => (
+                {Object.entries(STATUS_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
@@ -389,64 +421,98 @@ function App() {
             />
             <button type="submit">提交订单 Submit</button>
           </form>
-        ) : null}
+        )}
 
-        {activePage === "subAccounts" ? (
+        {activePage === "platform" && (
           <section className="panel">
-            <form className="form" onSubmit={createSubAccount}>
-              <input
-                placeholder="账号"
-                value={createSubForm.account}
-                onChange={(event) => setCreateSubForm((prev) => ({ ...prev, account: event.target.value }))}
-                required
-              />
-              <input
-                placeholder="初始密码"
-                type="password"
-                value={createSubForm.password}
-                onChange={(event) => setCreateSubForm((prev) => ({ ...prev, password: event.target.value }))}
-                required
-              />
+            <form className="form" onSubmit={onCreateTenant}>
+              <p>创建企业（租户）</p>
+              <div className="row">
+                <input
+                  placeholder="企业名称"
+                  value={tenantForm.name}
+                  onChange={(event) => setTenantForm((prev) => ({ ...prev, name: event.target.value }))}
+                  required
+                />
+                <input
+                  placeholder="企业编码（唯一）"
+                  value={tenantForm.code}
+                  onChange={(event) => setTenantForm((prev) => ({ ...prev, code: event.target.value }))}
+                  required
+                />
+              </div>
+              <button type="submit">创建企业</button>
+            </form>
+
+            <form className="form" onSubmit={onCreateAccount}>
+              <p>创建企业母账号 / 子账号</p>
               <div className="row">
                 <select
-                  value={createSubForm.role}
+                  value={accountForm.tenantId}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, tenantId: event.target.value }))}
+                  required
+                >
+                  <option value="">选择企业</option>
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.name} ({tenant.code})
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={accountForm.role}
                   onChange={(event) =>
-                    setCreateSubForm((prev) => ({
+                    setAccountForm((prev) => ({
                       ...prev,
-                      role: event.target.value as Extract<Role, "SUB_ACCOUNT">
+                      role: event.target.value as Extract<Role, "ADMIN" | "SUB_ACCOUNT">
                     }))
                   }
                 >
-                  <option value="SUB_ACCOUNT">子账号</option>
+                  <option value="ADMIN">企业母账号</option>
+                  <option value="SUB_ACCOUNT">企业子账号</option>
                 </select>
+              </div>
+              <div className="row">
                 <input
-                  placeholder="负责人编号(子账号用)"
-                  value={createSubForm.ownerCode}
-                  onChange={(event) => setCreateSubForm((prev) => ({ ...prev, ownerCode: event.target.value }))}
+                  placeholder="账号（母账号需01/02/03结尾）"
+                  value={accountForm.account}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, account: event.target.value }))}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="初始密码"
+                  value={accountForm.password}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, password: event.target.value }))}
+                  required
                 />
               </div>
-              <button type="submit">新增账号</button>
+              {accountForm.role === "SUB_ACCOUNT" && (
+                <div className="row">
+                  <select
+                    value={accountForm.managerUserId}
+                    onChange={(event) =>
+                      setAccountForm((prev) => ({ ...prev, managerUserId: event.target.value }))
+                    }
+                    required
+                  >
+                    <option value="">选择上级母账号</option>
+                    {managerCandidates.map((manager) => (
+                      <option key={manager.id} value={manager.id}>
+                        {manager.account}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="负责人编号"
+                    value={accountForm.ownerCode}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, ownerCode: event.target.value }))}
+                  />
+                </div>
+              )}
+              <button type="submit">创建账号</button>
             </form>
-            {tenantUsers.map((item) => (
-              <article key={item.id} className="order-row">
-                <div>
-                  <p className="order-content">{item.account}</p>
-                  <small>
-                    {item.role} {item.ownerCode ? `| 负责人 ${item.ownerCode}` : ""}
-                  </small>
-                </div>
-                <div className="order-actions">
-                  <button type="button" onClick={() => void toggleUserLogin(item, !item.allowLogin)}>
-                    {item.allowLogin ? "禁用登录" : "启用登录"}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </section>
-        ) : null}
 
-        {activePage === "platform" ? (
-          <section className="panel">
             {platformUsers.map((item) => (
               <article key={item.id} className="order-row">
                 <div>
@@ -456,23 +522,18 @@ function App() {
                   </small>
                 </div>
                 <div className="order-actions">
-                  <button type="button" onClick={() => void toggleUserLogin(item, !item.allowLogin)}>
-                    {item.allowLogin ? "Disable" : "Enable"}
+                  <button type="button" onClick={() => void toggleLogin(item, !item.allowLogin)}>
+                    {item.allowLogin ? "禁用登录" : "启用登录"}
                   </button>
                 </div>
               </article>
             ))}
           </section>
-        ) : null}
+        )}
       </main>
     </div>
   );
 }
 
 export default App;
-  const resolveImageUrl = (url: string | null): string => {
-    if (!url) {
-      return "#";
-    }
-    return url.startsWith("http://") || url.startsWith("https://") ? url : `${API_ORIGIN}${url}`;
-  };
+

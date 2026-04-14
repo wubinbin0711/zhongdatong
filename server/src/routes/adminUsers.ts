@@ -3,7 +3,6 @@ import { UserRole } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import type { AuthRequest } from "../types";
-import { hashPassword } from "../utils/password";
 
 const createUserSchema = z.object({
   account: z.string().min(3),
@@ -49,98 +48,16 @@ adminUsersRouter.get("/", async (req: AuthRequest, res) => {
 });
 
 adminUsersRouter.post("/", async (req: AuthRequest, res) => {
-  const parsed = createUserSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload" });
-    return;
-  }
-
-  const tenantId = req.user?.tenantId;
-  const managerUserId = req.user?.id;
-  if (!tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
-
-  const exists = await prisma.user.findUnique({ where: { account: parsed.data.account } });
-  if (exists) {
-    res.status(409).json({ message: "Account already exists" });
-    return;
-  }
-
-  const created = await prisma.user.create({
-    data: {
-      account: parsed.data.account,
-      passwordHash: await hashPassword(parsed.data.password),
-      role: parsed.data.role,
-      ownerCode: parsed.data.ownerCode,
-      allowLogin: parsed.data.allowLogin,
-      tenantId,
-      managerUserId
-    },
-    select: {
-      id: true,
-      account: true,
-      role: true,
-      ownerCode: true,
-      allowLogin: true,
-      managerUserId: true
-    }
-  });
-
-  res.status(201).json(created);
+  const _parsed = createUserSchema.safeParse(req.body);
+  res.status(403).json({ message: "Enterprise manager account cannot create accounts" });
 });
 
 adminUsersRouter.patch("/:userId/login-access", async (req: AuthRequest, res) => {
-  const parsed = loginAccessSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload" });
-    return;
-  }
-
-  const tenantId = req.user?.tenantId;
-  const managerUserId = req.user?.id;
-  if (!tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
-
-  const updated = await prisma.user.updateMany({
-    where: { id: req.params.userId, tenantId, role: UserRole.SUB_ACCOUNT, managerUserId },
-    data: { allowLogin: parsed.data.allowLogin }
-  });
-
-  if (!updated.count) {
-    res.status(404).json({ message: "User not found" });
-    return;
-  }
-
-  res.json({ message: "Login access updated" });
+  const _parsed = loginAccessSchema.safeParse(req.body);
+  res.status(403).json({ message: "Enterprise manager account cannot manage account login access" });
 });
 
 adminUsersRouter.post("/:userId/reset-password", async (req: AuthRequest, res) => {
-  const parsed = resetPasswordSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload" });
-    return;
-  }
-
-  const tenantId = req.user?.tenantId;
-  const managerUserId = req.user?.id;
-  if (!tenantId) {
-    res.status(400).json({ message: "Tenant is required" });
-    return;
-  }
-
-  const updated = await prisma.user.updateMany({
-    where: { id: req.params.userId, tenantId, role: UserRole.SUB_ACCOUNT, managerUserId },
-    data: { passwordHash: await hashPassword(parsed.data.newPassword) }
-  });
-
-  if (!updated.count) {
-    res.status(404).json({ message: "User not found" });
-    return;
-  }
-
-  res.json({ message: "Password reset complete" });
+  const _parsed = resetPasswordSchema.safeParse(req.body);
+  res.status(403).json({ message: "Enterprise manager account cannot reset account password" });
 });

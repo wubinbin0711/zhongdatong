@@ -9,6 +9,11 @@ const updateLoginSchema = z.object({
   allowLogin: z.boolean()
 });
 
+const createTenantSchema = z.object({
+  name: z.string().min(2),
+  code: z.string().min(2)
+});
+
 const createEnterpriseUserSchema = z
   .object({
     tenantId: z.string().min(1),
@@ -37,6 +42,38 @@ const createEnterpriseUserSchema = z
   });
 
 export const platformRouter = Router();
+
+platformRouter.get("/tenants", async (_req, res) => {
+  const tenants = await prisma.tenant.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      code: true
+    }
+  });
+  res.json(tenants);
+});
+
+platformRouter.post("/tenants", async (req, res) => {
+  const parsed = createTenantSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload" });
+    return;
+  }
+  const existing = await prisma.tenant.findUnique({ where: { code: parsed.data.code } });
+  if (existing) {
+    res.status(409).json({ message: "Tenant code already exists" });
+    return;
+  }
+  const created = await prisma.tenant.create({
+    data: {
+      name: parsed.data.name,
+      code: parsed.data.code
+    }
+  });
+  res.status(201).json(created);
+});
 
 platformRouter.get("/users", async (req, res) => {
   const tenantId = typeof req.query.tenantId === "string" ? req.query.tenantId : undefined;

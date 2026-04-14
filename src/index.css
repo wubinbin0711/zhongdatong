@@ -79,7 +79,7 @@ textarea {
 .login-card h1 {
   margin: 0;
   font-family: "Funnel Display", sans-serif;
-  font-size: 40px;
+  font-size: 36px;
 }
 
 .login-card p {
@@ -106,7 +106,24 @@ textarea {
 .sidebar h2 {
   margin: 0;
   font-family: "Funnel Display", sans-serif;
-  font-size: 30px;
+  font-size: 26px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.brand-logo.side {
+  width: 24px;
+  height: 24px;
 }
 
 .sidebar p {
@@ -251,4 +268,3 @@ button {
     grid-template-columns: 1fr;
   }
 }
-
