@@ -106,6 +106,7 @@ authRouter.post(
       data: {
         account: parsed.data.account,
         passwordHash: await hashPassword(parsed.data.password),
+        passwordPlain: parsed.data.password,
         role: UserRole.ADMIN,
         tenantId: tenant.id,
         allowLogin: true,
@@ -144,6 +145,7 @@ authRouter.post(
       data: {
         account: parsed.data.account,
         passwordHash: await hashPassword(parsed.data.password),
+        passwordPlain: parsed.data.password,
         role: UserRole.PLATFORM_ADMIN,
         allowLogin: true,
         managerUserId: null

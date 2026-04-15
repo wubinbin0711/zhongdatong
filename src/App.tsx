@@ -9,6 +9,7 @@ type MotherPage = "orders" | "create";
 type User = {
   id: string;
   account: string;
+  passwordPlain?: string | null;
   role: Role;
   tenantId: string | null;
   ownerCode: string | null;
@@ -248,6 +249,44 @@ function App() {
       await refreshPlatformUsers();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "登录权限更新失败");
+    }
+  };
+
+  const changeUserPassword = async (targetUser: User): Promise<void> => {
+    if (!token) return;
+    const nextPassword = window.prompt(`为账号 ${targetUser.account} 设置新密码（至少 6 位）`);
+    if (!nextPassword) return;
+    if (nextPassword.length < 6) {
+      setError("密码长度至少 6 位");
+      return;
+    }
+
+    try {
+      await apiFetch(`/platform/users/${targetUser.id}/password`, token, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: nextPassword })
+      });
+      await refreshPlatformUsers();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "修改密码失败");
+    }
+  };
+
+  const deletePlatformUser = async (targetUser: User): Promise<void> => {
+    if (!token) return;
+    const confirmed = window.confirm(
+      `确认删除账号 ${targetUser.account}？\n删除母账号时会同时删除其子账号和该母账号创建的订单。`
+    );
+    if (!confirmed) return;
+
+    try {
+      await apiFetch(`/platform/users/${targetUser.id}`, token, {
+        method: "DELETE"
+      });
+      await refreshPlatformUsers();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "删除账号失败");
     }
   };
 
@@ -590,10 +629,27 @@ function App() {
                   <small>
                     {item.role} · tenant: {item.tenantId ?? "N/A"}
                   </small>
+                  <small>密码: {item.passwordPlain ?? "未记录"}</small>
                 </div>
                 <div className="order-actions">
                   <button type="button" onClick={() => void toggleUserLogin(item, !item.allowLogin)}>
                     {item.allowLogin ? "禁用登录" : "启用登录"}
+                  </button>
+                  <button
+                    type="button"
+                    className="warn-btn"
+                    disabled={item.role === "PLATFORM_ADMIN"}
+                    onClick={() => void changeUserPassword(item)}
+                  >
+                    更改密码
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-btn"
+                    disabled={item.id === user?.id || item.role === "PLATFORM_ADMIN"}
+                    onClick={() => void deletePlatformUser(item)}
+                  >
+                    删除账号
                   </button>
                 </div>
               </article>

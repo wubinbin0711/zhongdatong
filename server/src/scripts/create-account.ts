@@ -86,6 +86,7 @@ const run = async (): Promise<void> => {
       managerUserId,
       account: args.account,
       passwordHash: await hashPassword(args.password),
+      passwordPlain: args.password,
       role: args.role,
       ownerCode: args.role === UserRole.SUB_ACCOUNT ? args.ownerCode ?? "1" : null,
       allowLogin: true
@@ -93,6 +94,7 @@ const run = async (): Promise<void> => {
     select: {
       id: true,
       account: true,
+      passwordPlain: true,
       role: true,
       tenantId: true,
       managerUserId: true,

@@ -297,6 +297,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .order-filters {
@@ -334,8 +335,17 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .danger-btn {
   background: #ef4444;
+}
+
+.warn-btn {
+  background: #f59e0b;
 }
 
 .error-text {

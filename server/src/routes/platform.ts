@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../prisma";
 import { hashPassword } from "../utils/password";
 import { asyncHandler } from "../utils/asyncHandler";
+import type { AuthRequest } from "../types";
 
 class HttpError extends Error {
   status: number;
@@ -25,6 +26,10 @@ const optionalText = z.preprocess(
 
 const updateLoginSchema = z.object({
   allowLogin: z.boolean()
+});
+
+const updatePasswordSchema = z.object({
+  newPassword: z.string().min(6)
 });
 
 const createEnterpriseUserSchema = z
@@ -91,6 +96,7 @@ platformRouter.get(
       select: {
         id: true,
         account: true,
+        passwordPlain: true,
         role: true,
         tenantId: true,
         allowLogin: true,
@@ -158,6 +164,7 @@ platformRouter.post(
             tenantId,
             account: parsed.data.account,
             passwordHash,
+            passwordPlain: parsed.data.password,
             role: parsed.data.role,
             ownerCode: parsed.data.role === UserRole.SUB_ACCOUNT ? parsed.data.ownerCode ?? "1" : null,
             managerUserId: parsed.data.role === UserRole.SUB_ACCOUNT ? parsed.data.managerUserId : null,
@@ -167,6 +174,7 @@ platformRouter.post(
             id: true,
             tenantId: true,
             account: true,
+            passwordPlain: true,
             role: true,
             ownerCode: true,
             managerUserId: true,
@@ -212,5 +220,82 @@ platformRouter.patch(
     }
 
     res.json({ message: "Updated" });
+  })
+);
+
+platformRouter.patch(
+  "/users/:userId/password",
+  asyncHandler(async (req, res) => {
+    const parsed = updatePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid payload" });
+      return;
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: { id: true }
+    });
+    if (!target) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    await prisma.user.update({
+      where: { id: target.id },
+      data: {
+        passwordHash: await hashPassword(parsed.data.newPassword),
+        passwordPlain: parsed.data.newPassword
+      }
+    });
+
+    res.json({ message: "Password updated" });
+  })
+);
+
+platformRouter.delete(
+  "/users/:userId",
+  asyncHandler(async (req: AuthRequest, res) => {
+    const currentUserId = req.user?.id;
+    const userId = req.params.userId;
+
+    if (currentUserId && userId === currentUserId) {
+      res.status(400).json({ message: "You cannot delete your own account" });
+      return;
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true }
+    });
+    if (!target) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    if (target.role === UserRole.PLATFORM_ADMIN) {
+      res.status(400).json({ message: "Platform admin account cannot be deleted here" });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (target.role === UserRole.ADMIN) {
+        const subAccountIds = await tx.user.findMany({
+          where: { managerUserId: target.id, role: UserRole.SUB_ACCOUNT },
+          select: { id: true }
+        });
+
+        if (subAccountIds.length) {
+          await tx.user.deleteMany({
+            where: { id: { in: subAccountIds.map((item) => item.id) } }
+          });
+        }
+      }
+
+      await tx.order.deleteMany({ where: { createdByUserId: target.id } });
+      await tx.user.delete({ where: { id: target.id } });
+    });
+
+    res.json({ message: "User deleted" });
   })
 );
