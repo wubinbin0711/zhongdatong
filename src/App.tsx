@@ -3,6 +3,7 @@ import logo from "./assets/logow.png";
 
 type Role = "PLATFORM_ADMIN" | "ADMIN" | "SUB_ACCOUNT";
 type OrderStatus = "COMPLETED" | "TODO" | "OUT_OF_STOCK" | "IN_PROGRESS";
+type OrderFilterStatus = "ALL" | OrderStatus;
 type MotherPage = "orders" | "create";
 
 type User = {
@@ -62,6 +63,8 @@ function App() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [platformUsers, setPlatformUsers] = useState<User[]>([]);
+  const [orderFilterStatus, setOrderFilterStatus] = useState<OrderFilterStatus>("ALL");
+  const [orderFilterOwner, setOrderFilterOwner] = useState("ALL");
 
   const [loginForm, setLoginForm] = useState({ account: "", password: "" });
   const [createOrderForm, setCreateOrderForm] = useState({
@@ -94,7 +97,15 @@ function App() {
 
   const refreshOrders = async (): Promise<void> => {
     if (!token) return;
-    const rows = await apiFetch<Order[]>("/orders", token);
+    const query = new URLSearchParams();
+    if (orderFilterStatus !== "ALL") {
+      query.set("status", orderFilterStatus);
+    }
+    if (orderFilterOwner !== "ALL") {
+      query.set("ownerCode", orderFilterOwner);
+    }
+    const suffix = query.toString();
+    const rows = await apiFetch<Order[]>(`/orders${suffix ? `?${suffix}` : ""}`, token);
     setOrders(rows);
   };
 
@@ -115,7 +126,7 @@ function App() {
         setError(requestError instanceof Error ? requestError.message : "请求失败");
       }
     })();
-  }, [isLoggedIn, token, isPlatformAdmin]);
+  }, [isLoggedIn, token, isPlatformAdmin, orderFilterStatus, orderFilterOwner]);
 
   const onLogin = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -148,6 +159,8 @@ function App() {
     setUser(null);
     setOrders([]);
     setPlatformUsers([]);
+    setOrderFilterStatus("ALL");
+    setOrderFilterOwner("ALL");
     setError("");
   };
 
@@ -275,6 +288,29 @@ function App() {
     </section>
   );
 
+  const renderOrderFilters = () => (
+    <div className="order-filters">
+      <select
+        value={orderFilterStatus}
+        onChange={(event) => setOrderFilterStatus(event.target.value as OrderFilterStatus)}
+      >
+        <option value="ALL">全部状态</option>
+        {Object.entries(STATUS_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <select value={orderFilterOwner} onChange={(event) => setOrderFilterOwner(event.target.value)}>
+        <option value="ALL">全部负责人</option>
+        <option value="1">负责人 1</option>
+        <option value="2">负责人 2</option>
+        <option value="3">负责人 3</option>
+        <option value="4">负责人 4</option>
+      </select>
+    </div>
+  );
+
   const renderLogin = () => (
     <div className="app-bg login-layout">
       <div className="bg-orb orb-left" />
@@ -345,6 +381,7 @@ function App() {
           {motherPage === "orders" ? (
             <>
               <div className="info-banner">母账号仅可新增/删除订单，不可创建账号</div>
+              {renderOrderFilters()}
               {renderOrderRows(true)}
             </>
           ) : (
@@ -423,6 +460,7 @@ function App() {
           </header>
           <div className="info-banner">仅查看上级母账号创建的订单；仅可修改状态，不能删除</div>
           {error ? <p className="error-text">{error}</p> : null}
+          {renderOrderFilters()}
           {renderOrderRows(false)}
         </main>
       </div>

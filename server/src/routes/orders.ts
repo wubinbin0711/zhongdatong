@@ -65,7 +65,9 @@ ordersRouter.get(
         return;
       }
       where.createdByUserId = user.managerUserId;
-    } else if (ownerCode) {
+    }
+
+    if (ownerCode) {
       where.ownerCode = ownerCode;
     }
 

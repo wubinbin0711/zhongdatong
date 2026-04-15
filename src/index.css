@@ -299,6 +299,12 @@ textarea {
   gap: 8px;
 }
 
+.order-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -382,6 +388,10 @@ button {
   }
 
   .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .order-filters {
     grid-template-columns: 1fr;
   }
 }
